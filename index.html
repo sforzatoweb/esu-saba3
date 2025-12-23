@@ -17,11 +17,12 @@
         select, button { padding: 8px; border-radius: 4px; border: 1px solid #ccc; font-size: 0.9rem; }
         button { background-color: #3498db; color: white; border: none; cursor: pointer; font-weight: bold; transition: 0.2s; }
         button:hover { background-color: #2980b9; }
-        .reset-btn { background-color: #e74c3c; margin-top: 10px; font-size: 0.8em; opacity: 0.7; }
+        .reset-btn { background-color: #e74c3c; margin-top: 10px; font-size: 0.8em; opacity: 0.8; }
         .reset-btn:hover { background-color: #c0392b; opacity: 1; }
         table { width: 100%; border-collapse: collapse; margin-top: 15px; background: white; font-size: 0.9rem; }
         th, td { border: 1px solid #ddd; padding: 10px; text-align: center; }
         th { background-color: #3498db; color: white; }
+        tr:nth-child(even) { background-color: #f9f9f9; }
     </style>
 </head>
 <body>
@@ -30,10 +31,10 @@
 
     <div class="container">
         <div class="card" id="memberCard">
-            <h3>1. 参加者登録</h3>
+            <h3>1. 参加者登録 (10名)</h3>
             <div id="memberInputs"></div>
-            <button onclick="updateMemberList()" style="width: 100%; margin-top: 10px;">メンバーを確定・枠を隠す</button>
-            <button onclick="showAllInputs()" style="width: 100%; margin-top: 5px; background-color: #95a5a6;">名前を編集する</button>
+            <button onclick="updateMemberList()" id="memberBtn" style="width: 100%; margin-top: 10px;">メンバーを確定・全員と共有</button>
+            <button onclick="showAllInputs()" style="width: 100%; margin-top: 5px; background-color: #95a5a6;">名前を再編集する</button>
         </div>
 
         <div class="card">
@@ -51,7 +52,7 @@
     <div class="card" style="margin-top: 20px;">
         <div style="display: flex; justify-content: space-between; align-items: center;">
             <h3>3. 総合ランキング</h3>
-            <button onclick="clearRanking()" class="reset-btn">ランキングをリセット</button>
+            <button onclick="clearRanking()" class="reset-btn">全データをリセット</button>
         </div>
         <table id="rankingTable">
             <thead>
@@ -64,13 +65,11 @@
     </div>
 
     <script>
-        // あなたのGASのURL
-        const GAS_URL = "https://script.google.com/macros/s/AKfycbyeOjRnBXKKDQS_f_uNam_TZ5yI7uZ5rELyxcS-BKjjIF2Mo4OeuRFg6ieOaqpJl8Xm/exec"; 
+        const GAS_URL = "https://script.google.com/macros/s/AKfycbyWK55tMu_8stwQvpTDFGWRyiswsW1q0d7jdI_J2bzoZ4IXt6JGR0-dB4h9n2C5k6Gx/exec"; 
 
         document.addEventListener("DOMContentLoaded", function() {
             initForm();
-            loadSavedNames(); // 保存された名前を呼び出す
-            fetchRanking();
+            fetchData(); // ランキングとメンバーを両方取得
         });
 
         function initForm() {
@@ -79,7 +78,7 @@
 
             let mHtml = "";
             for (let i = 1; i <= 10; i++) {
-                mHtml += `<input type="text" class="member-input" id="m${i}" placeholder="参加者 ${i}" onchange="saveNamesToLocal()">`;
+                mHtml += `<input type="text" class="member-input" id="m${i}" placeholder="参加者 ${i}">`;
             }
             mDiv.innerHTML = mHtml;
 
@@ -105,41 +104,55 @@
             cDiv.innerHTML = cHtml;
         }
 
-        // ブラウザに名前を保存
-        function saveNamesToLocal() {
-            const names = [];
-            for (let i = 1; i <= 10; i++) {
-                names.push(document.getElementById(`m${i}`).value);
-            }
-            localStorage.setItem('esuSabaNames', JSON.stringify(names));
-        }
-
-        // 保存された名前を読み込む
-        function loadSavedNames() {
-            const saved = localStorage.getItem('esuSabaNames');
-            if (saved) {
-                const names = JSON.parse(saved);
-                names.forEach((name, i) => {
-                    if (document.getElementById(`m${i+1}`)) {
-                        document.getElementById(`m${i+1}`).value = name;
-                    }
-                });
-                updateMemberList(); // 名前があれば自動的にプルダウン反映＋枠消し
-            }
-        }
-
-        function updateMemberList() {
-            const names = [];
-            for (let i = 1; i <= 10; i++) {
-                const input = document.getElementById(`m${i}`);
-                const val = input.value.trim();
-                if (val) {
-                    names.push(val);
-                } else {
-                    input.style.display = "none"; // 空の枠を消す
+        async function fetchData() {
+            try {
+                const response = await fetch(GAS_URL);
+                const data = await response.json();
+                
+                if (data.members && data.members.length > 0) {
+                    data.members.forEach((name, i) => {
+                        if (i < 10) document.getElementById(`m${i+1}`).value = name;
+                    });
+                    applyMemberUI(data.members);
                 }
+                updateRanking(data.scores);
+            } catch (e) { console.error("読み込みエラー:", e); }
+        }
+
+        async function updateMemberList() {
+            const names = [];
+            for (let i = 1; i <= 10; i++) {
+                const val = document.getElementById(`m${i}`).value.trim();
+                if (val) names.push(val);
             }
             
+            const btn = document.getElementById('memberBtn');
+            btn.disabled = true;
+            btn.innerText = "同期中...";
+
+            try {
+                await fetch(GAS_URL, {
+                    method: "POST",
+                    body: JSON.stringify({ action: "saveMembers", names: names })
+                });
+                applyMemberUI(names);
+                alert("メンバーリストを全員の画面に共有しました！");
+            } catch (e) { alert("共有に失敗しました"); }
+            finally {
+                btn.disabled = false;
+                btn.innerText = "メンバーを確定・全員と共有";
+            }
+        }
+
+        function applyMemberUI(names) {
+            for (let i = 1; i <= 10; i++) {
+                const input = document.getElementById(`m${i}`);
+                if (input.value.trim() === "") {
+                    input.style.display = "none";
+                } else {
+                    input.style.display = "block";
+                }
+            }
             const dropdowns = [document.getElementById('oniSelect'), ...document.querySelectorAll('.ko-sel')];
             dropdowns.forEach(select => {
                 const currentVal = select.value;
@@ -151,16 +164,6 @@
         function showAllInputs() {
             for (let i = 1; i <= 10; i++) {
                 document.getElementById(`m${i}`).style.display = "block";
-            }
-        }
-
-        async function fetchRanking() {
-            try {
-                const response = await fetch(GAS_URL);
-                const scores = await response.json();
-                updateRanking(scores);
-            } catch (e) {
-                console.error("読み込みエラー:", e);
             }
         }
 
@@ -179,6 +182,7 @@
         async function saveMatch() {
             const oniName = document.getElementById('oniSelect').value;
             if (!oniName) { alert("鬼を選択してください"); return; }
+            
             const btn = document.getElementById('saveBtn');
             btn.disabled = true;
             btn.innerText = "保存中...";
@@ -201,20 +205,20 @@
 
             try {
                 await fetch(GAS_URL, { method: "POST", body: JSON.stringify(matchData) });
-                alert("保存しました！");
-                fetchRanking();
+                alert("保存完了！");
+                fetchData();
                 resetForm();
-            } catch (e) { alert("失敗しました"); }
+            } catch (e) { alert("保存に失敗しました。"); }
             finally { btn.disabled = false; btn.innerText = "試合結果を保存・集計"; }
         }
 
         async function clearRanking() {
-            if(!confirm("【注意】すべての試合データを削除してランキングをリセットしますか？")) return;
+            if(!confirm("スプレッドシートの全記録をリセットします。よろしいですか？")) return;
             try {
                 await fetch(GAS_URL, { method: "POST", body: JSON.stringify({action: "clear"}) });
-                alert("リセット完了しました");
-                fetchRanking();
-            } catch (e) { alert("リセットに失敗しました"); }
+                alert("リセット完了");
+                fetchData();
+            } catch (e) { alert("失敗しました"); }
         }
 
         function resetForm() {
@@ -231,7 +235,7 @@
         function updateRanking(scores) {
             const tbody = document.querySelector('#rankingTable tbody');
             tbody.innerHTML = '';
-            const sorted = Object.entries(scores).sort((a, b) => b[1] - a[1]);
+            const sorted = Object.entries(scores || {}).sort((a, b) => b[1] - a[1]);
             if (sorted.length === 0) {
                 tbody.innerHTML = '<tr><td colspan="3">記録はありません</td></tr>';
                 return;
