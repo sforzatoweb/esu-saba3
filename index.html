@@ -37,3 +37,210 @@
         </div>
 
         <div class="card">
+            <h3>2. 試合結果の入力</h3>
+            <div class="score-row" style="background: #fff5f5; padding: 10px; border-radius: 8px; margin-bottom: 10px;">
+                <strong>👹 鬼:</strong>
+                <select id="oniSelect"><option value="">選択</option></select>
+                <span style="margin-left:10px;">獲得: <strong id="oniTotalDisplay">0</strong> pt</span>
+            </div>
+            <div id="childrenInputs"></div>
+            <button onclick="saveMatch()" id="saveBtn" style="width: 100%; background-color: #e67e22; margin-top: 15px; height: 50px; font-size: 1.1em;">試合結果を保存・集計</button>
+        </div>
+    </div>
+
+    <div class="card" style="margin-top: 20px;">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+            <h3>3. 総合ランキング</h3>
+            <button onclick="clearRanking()" class="reset-btn">ランキングをリセット</button>
+        </div>
+        <table id="rankingTable">
+            <thead>
+                <tr><th>順位</th><th>名前</th><th>総合ポイント</th></tr>
+            </thead>
+            <tbody>
+                <tr><td colspan="3">データを読み込み中...</td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <script>
+        // あなたのGASのURL
+        const GAS_URL = "https://script.google.com/macros/s/AKfycbyeOjRnBXKKDQS_f_uNam_TZ5yI7uZ5rELyxcS-BKjjIF2Mo4OeuRFg6ieOaqpJl8Xm/exec"; 
+
+        document.addEventListener("DOMContentLoaded", function() {
+            initForm();
+            loadSavedNames(); // 保存された名前を呼び出す
+            fetchRanking();
+        });
+
+        function initForm() {
+            const mDiv = document.getElementById('memberInputs');
+            const cDiv = document.getElementById('childrenInputs');
+
+            let mHtml = "";
+            for (let i = 1; i <= 10; i++) {
+                mHtml += `<input type="text" class="member-input" id="m${i}" placeholder="参加者 ${i}" onchange="saveNamesToLocal()">`;
+            }
+            mDiv.innerHTML = mHtml;
+
+            let cHtml = "";
+            for (let i = 1; i <= 4; i++) {
+                cHtml += `
+                <div class="score-row">
+                    <div>
+                        🏃 子${i}: <select id="ko${i}Select" class="ko-sel"><option value="">選択</option></select>
+                        <select id="ko${i}Time" onchange="calculatePoints()">
+                            <option value="0">3~2分(0pt)</option>
+                            <option value="1">2~1分(1pt)</option>
+                            <option value="2">1分~終了(2pt)</option>
+                            <option value="3">逃げ切り(3pt)</option>
+                        </select>
+                    </div>
+                    <div class="bonus-group">
+                        <label class="bonus-item"><input type="checkbox" id="ko${i}B1" onchange="calculatePoints()"> 敵陣(+0.5)</label>
+                        <label class="bonus-item"><input type="checkbox" id="ko${i}B2" onchange="calculatePoints()"> 最敵陣(+0.5)</label>
+                    </div>
+                </div>`;
+            }
+            cDiv.innerHTML = cHtml;
+        }
+
+        // ブラウザに名前を保存
+        function saveNamesToLocal() {
+            const names = [];
+            for (let i = 1; i <= 10; i++) {
+                names.push(document.getElementById(`m${i}`).value);
+            }
+            localStorage.setItem('esuSabaNames', JSON.stringify(names));
+        }
+
+        // 保存された名前を読み込む
+        function loadSavedNames() {
+            const saved = localStorage.getItem('esuSabaNames');
+            if (saved) {
+                const names = JSON.parse(saved);
+                names.forEach((name, i) => {
+                    if (document.getElementById(`m${i+1}`)) {
+                        document.getElementById(`m${i+1}`).value = name;
+                    }
+                });
+                updateMemberList(); // 名前があれば自動的にプルダウン反映＋枠消し
+            }
+        }
+
+        function updateMemberList() {
+            const names = [];
+            for (let i = 1; i <= 10; i++) {
+                const input = document.getElementById(`m${i}`);
+                const val = input.value.trim();
+                if (val) {
+                    names.push(val);
+                } else {
+                    input.style.display = "none"; // 空の枠を消す
+                }
+            }
+            
+            const dropdowns = [document.getElementById('oniSelect'), ...document.querySelectorAll('.ko-sel')];
+            dropdowns.forEach(select => {
+                const currentVal = select.value;
+                select.innerHTML = '<option value="">選択</option>' + names.map(n => `<option value="${n}">${n}</option>`).join('');
+                select.value = currentVal;
+            });
+        }
+
+        function showAllInputs() {
+            for (let i = 1; i <= 10; i++) {
+                document.getElementById(`m${i}`).style.display = "block";
+            }
+        }
+
+        async function fetchRanking() {
+            try {
+                const response = await fetch(GAS_URL);
+                const scores = await response.json();
+                updateRanking(scores);
+            } catch (e) {
+                console.error("読み込みエラー:", e);
+            }
+        }
+
+        function calculatePoints() {
+            let oniBonus = 0;
+            for (let i = 1; i <= 4; i++) {
+                const timeVal = parseInt(document.getElementById(`ko${i}Time`).value);
+                if (timeVal === 0) oniBonus += 3;
+                else if (timeVal === 1) oniBonus += 2;
+                else if (timeVal === 2) oniBonus += 1;
+            }
+            document.getElementById('oniTotalDisplay').innerText = oniBonus;
+            return oniBonus;
+        }
+
+        async function saveMatch() {
+            const oniName = document.getElementById('oniSelect').value;
+            if (!oniName) { alert("鬼を選択してください"); return; }
+            const btn = document.getElementById('saveBtn');
+            btn.disabled = true;
+            btn.innerText = "保存中...";
+
+            const matchData = {
+                action: "save",
+                oniName: oniName,
+                oniPoints: calculatePoints(),
+                children: []
+            };
+
+            for (let i = 1; i <= 4; i++) {
+                const name = document.getElementById(`ko${i}Select`).value;
+                if (!name) continue;
+                let p = parseInt(document.getElementById(`ko${i}Time`).value);
+                if (document.getElementById(`ko${i}B1`).checked) p += 0.5;
+                if (document.getElementById(`ko${i}B2`).checked) p += 0.5;
+                matchData.children.push({ name: name, points: p });
+            }
+
+            try {
+                await fetch(GAS_URL, { method: "POST", body: JSON.stringify(matchData) });
+                alert("保存しました！");
+                fetchRanking();
+                resetForm();
+            } catch (e) { alert("失敗しました"); }
+            finally { btn.disabled = false; btn.innerText = "試合結果を保存・集計"; }
+        }
+
+        async function clearRanking() {
+            if(!confirm("【注意】すべての試合データを削除してランキングをリセットしますか？")) return;
+            try {
+                await fetch(GAS_URL, { method: "POST", body: JSON.stringify({action: "clear"}) });
+                alert("リセット完了しました");
+                fetchRanking();
+            } catch (e) { alert("リセットに失敗しました"); }
+        }
+
+        function resetForm() {
+            for (let i = 1; i <= 4; i++) {
+                document.getElementById(`ko${i}B1`).checked = false;
+                document.getElementById(`ko${i}B2`).checked = false;
+                document.getElementById(`ko${i}Time`).value = "0";
+                document.getElementById(`ko${i}Select`).value = "";
+            }
+            document.getElementById('oniSelect').value = "";
+            calculatePoints();
+        }
+
+        function updateRanking(scores) {
+            const tbody = document.querySelector('#rankingTable tbody');
+            tbody.innerHTML = '';
+            const sorted = Object.entries(scores).sort((a, b) => b[1] - a[1]);
+            if (sorted.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="3">記録はありません</td></tr>';
+                return;
+            }
+            sorted.forEach((item, index) => {
+                const row = tbody.insertRow();
+                row.innerHTML = `<td>${index + 1}</td><td>${item[0]}</td><td>${item[1].toFixed(1)} pt</td>`;
+            });
+        }
+    </script>
+</body>
+</html>
