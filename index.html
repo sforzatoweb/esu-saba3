@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>えす鯖かくれんぼ大会！！</title>
+    <style>
+        body { font-family: "Helvetica Neue", Arial, "Hiragino Kaku Gothic ProN", "BIZ UDPGothic", sans-serif; background-color: #f0f4f8; color: #333; max-width: 950px; margin: 0 auto; padding: 10px; }
+        h1 { text-align: center; color: #2c3e50; border-bottom: 3px solid #3498db; padding-bottom: 10px; font-size: 1.5rem; }
+        .container { display: flex; gap: 15px; flex-wrap: wrap; }
+        .card { background: white; padding: 15px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); flex: 1; min-width: 300px; }
+        h3 { margin-top: 0; color: #34495e; border-left: 5px solid #3498db; padding-left: 10px; font-size: 1.1rem; }
+        .member-input { margin-bottom: 5px; display: block; width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; }
+        .score-row { border-bottom: 1px solid #eee; padding: 12px 0; }
+        .bonus-group { font-size: 0.8em; margin-top: 8px; color: #555; display: flex; gap: 8px; flex-wrap: wrap; }
+        .bonus-item { display: flex; align-items: center; gap: 3px; background: #eef7ff; padding: 4px 8px; border-radius: 4px; cursor: pointer; }
+        select, button { padding: 8px; border-radius: 4px; border: 1px solid #ccc; font-size: 0.9rem; }
+        button { background-color: #3498db; color: white; border: none; cursor: pointer; font-weight: bold; transition: 0.2s; }
+        button:hover { background-color: #2980b9; }
+        button:disabled { background-color: #ccc; }
+        table { width: 100%; border-collapse: collapse; margin-top: 15px; background: white; font-size: 0.9rem; }
+        th, td { border: 1px solid #ddd; padding: 10px; text-align: center; }
+        th { background-color: #3498db; color: white; }
+        tr:nth-child(even) { background-color: #f9f9f9; }
+    </style>
+</head>
+<body>
+
+    <h1>🎮 えす鯖かくれんぼ大会！！</h1>
+
+    <div class="container">
+        <div class="card">
+            <h3>1. 参加者登録 (10名)</h3>
+            <div id="memberInputs"></div>
+            <button onclick="updateMemberList()" style="width: 100%; margin-top: 10px;">メンバーリストを確定</button>
+        </div>
+
+        <div class="card">
+            <h3>2. 試合結果の入力</h3>
+            <div class="score-row" style="background: #fff5f5; padding: 10px; border-radius: 8px; margin-bottom: 10px;">
+                <strong>👹 鬼:</strong>
+                <select id="oniSelect"><option value="">選択</option></select>
+                <span style="margin-left:10px;">獲得: <strong id="oniTotalDisplay">0</strong> pt</span>
+            </div>
+            <div id="childrenInputs"></div>
+            <button onclick="saveMatch()" id="saveBtn" style="width: 100%; background-color: #e67e22; margin-top: 15px; height: 50px; font-size: 1.1em;">試合結果を保存・集計</button>
+        </div>
+    </div>
+
+    <div class="card" style="margin-top: 20px;">
+        <h3>3. 総合ランキング</h3>
+        <table id="rankingTable">
+            <thead>
+                <tr><th>順位</th><th>名前</th><th>総合ポイント</th></tr>
+            </thead>
+            <tbody>
+                <tr><td colspan="3">データを読み込み中...</td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <script>
+        // 【重要】ここにあなたのGAS（ウェブアプリ）のURLを貼り付けてください
+        const GAS_URL = "ここにウェブアプリのURLを貼り付け"; 
+
+        // ページ読み込み完了時に実行
+        document.addEventListener("DOMContentLoaded", function() {
+            initForm();      
+            if (GAS_URL.includes("http")) {
+                fetchRanking();
+            } else {
+                alert("GASのURLが設定されていません。コード内のGAS_URLを書き換えてください。");
+            }
+        });
+
+        function initForm() {
+            const mDiv = document.getElementById('memberInputs');
+            const cDiv = document.getElementById('childrenInputs');
+
+            // 10人分の入力枠
+            let mHtml = "";
+            for (let i = 1; i <= 10; i++) {
+                mHtml += `<input type="text" class="member-input" id="m${i}" placeholder="参加者 ${i}">`;
+            }
+            mDiv.innerHTML = mHtml;
+
+            // 子4人分の入力枠
+            let cHtml = "";
+            for (let i = 1; i <= 4; i++) {
+                cHtml += `
+                <div class="score-row">
+                    <div>
+                        🏃 子${i}: <select id="ko${i}Select" class="ko-sel"><option value="">選択</option></select>
+                        <select id="ko${i}Time" onchange="calculatePoints()">
+                            <option value="0">3~2分(0pt)</option>
+                            <option value="1">2~1分(1pt)</option>
+                            <option value="2">1分~終了(2pt)</option>
+                            <option value="3">逃げ切り(3pt)</option>
+                        </select>
+                    </div>
+                    <div class="bonus-group">
+                        <label class="bonus-item"><input type="checkbox" id="ko${i}B1" onchange="calculatePoints()"> 敵陣(+0.5)</label>
+                        <label class="bonus-item"><input type="checkbox" id="ko${i}B2" onchange="calculatePoints()"> 最敵陣(+0.5)</label>
+                    </div>
+                </div>`;
+            }
+            cDiv.innerHTML = cHtml;
+        }
+
+        let scores = {};
+
+        async function fetchRanking() {
+            try {
+                const response = await fetch(GAS_URL);
+                scores = await response.json();
+                updateRanking();
+            } catch (e) {
+                console.error("読み込みエラー:", e);
+                document.querySelector('#rankingTable tbody').innerHTML = '<tr><td colspan="3">データの読み込みに失敗しました</td></tr>';
+            }
+        }
+
+        function updateMemberList() {
+            const names = [];
+            for (let i = 1; i <= 10; i++) {
+                const val = document.getElementById(`m${i}`).value.trim();
+                if (val) names.push(val);
+            }
+            
+            const dropdowns = [document.getElementById('oniSelect'), ...document.querySelectorAll('.ko-sel')];
+            dropdowns.forEach(select => {
+                const currentVal = select.value;
+                let html = '<option value="">選択</option>';
+                names.forEach(n => {
+                    html += `<option value="${n}">${n}</option>`;
+                });
+                select.innerHTML = html;
+                select.value = currentVal;
+            });
+            alert("メンバーをプルダウンに反映しました。");
+        }
+
+        function calculatePoints() {
+            let oniBonus = 0;
+            for (let i = 1; i <= 4; i++) {
+                const timeVal = parseInt(document.getElementById(`ko${i}Time`).value);
+                if (timeVal === 0) oniBonus += 3;
+                else if (timeVal === 1) oniBonus += 2;
+                else if (timeVal === 2) oniBonus += 1;
+            }
+            document.getElementById('oniTotalDisplay').innerText = oniBonus;
+            return oniBonus;
+        }
+
+        async function saveMatch() {
+            const oniName = document.getElementById('oniSelect').value;
+            if (!oniName) { alert("鬼を選択してください"); return; }
+
+            const matchData = {
+                oniName: oniName,
+                oniPoints: calculatePoints(),
+                children: []
+            };
+
+            for (let i = 1; i <= 4; i++) {
+                const name = document.getElementById(`ko${i}Select`).value;
+                if (!name) continue;
+                let p = parseInt(document.getElementById(`ko${i}Time`).value);
+                if (document.getElementById(`ko${i}B1`).checked) p += 0.5;
+                if (document.getElementById(`ko${i}B2`).checked) p += 0.5;
+                matchData.children.push({ name: name, points: p });
+            }
+
+            const btn = document.getElementById('saveBtn');
+            const originalText = btn.innerText;
+            btn.innerText = "保存中...";
+            btn.disabled = true;
+
+            try {
+                const resp = await fetch(GAS_URL, { method: "POST", body: JSON.stringify(matchData) });
+                if (resp.ok) {
+                    alert("保存しました！");
+                    await fetchRanking();
+                    resetForm();
+                } else {
+                    throw new Error();
+                }
+            } catch (e) {
+                alert("保存に失敗しました。GASの設定（アクセス権限：全員）を確認してください。");
+            } finally {
+                btn.innerText = originalText;
+                btn.disabled = false;
+            }
+        }
+
+        function resetForm() {
+            for (let i = 1; i <= 4; i++) {
+                document.getElementById(`ko${i}B1`).checked = false;
+                document.getElementById(`ko${i}B2`).checked = false;
+                document.getElementById(`ko${i}Time`).value = "0";
+                document.getElementById(`ko${i}Select`).value = "";
+            }
+            document.getElementById('oniSelect').value = "";
+            calculatePoints();
+        }
+
+        function updateRanking() {
+            const tbody = document.querySelector('#rankingTable tbody');
+            tbody.innerHTML = '';
+            
+            const sorted = Object.entries(scores).sort((a, b) => b[1] - a[1]);
+            
+            if (sorted.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="3">記録はまだありません</td></tr>';
+                return;
+            }
+
+            sorted.forEach((item, index) => {
+                const row = tbody.insertRow();
+                row.innerHTML = `<td>${index + 1}</td><td>${item[0]}</td><td>${item[1].toFixed(1)} pt</td>`;
+            });
+        }
+    </script>
+</body>
+</html>
